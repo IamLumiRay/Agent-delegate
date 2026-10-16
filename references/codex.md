@@ -10,6 +10,8 @@ Use [setup.md](setup.md#codex) once to register a target. Later calls use `--tar
 
 Resolve `<skill>` to this skill's installed directory. Use an available Python 3.10+ interpreter; no Python packages are required.
 
+Configure the [workspace's state ignore rules](setup.md#local-state-and-git) before writing receipts.
+
 ```powershell
 python "<skill>/scripts/invoke_codex.py" new --target codex-b --cwd "<workspace>" --state-dir "<workspace>/.agent-delegate/codex" --prompt "Review the specified files without editing them."
 python "<skill>/scripts/invoke_codex.py" send --target codex-b --conversation-id "<UUID>" --state-dir "<workspace>/.agent-delegate/codex" --prompt "Verify the specific issue in your previous answer."

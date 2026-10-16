@@ -59,7 +59,7 @@ function Invoke-AntigravityWorkflow {
     param(
         [Parameter(Mandatory)]$Context,
         [Parameter(Mandatory)][string]$Id,
-        [Parameter(Mandatory)][string]$Workflow,
+        [string]$Workflow,
         [Parameter(Mandatory)][string]$Prompt
     )
 
@@ -76,6 +76,7 @@ function Invoke-AntigravityWorkflow {
     $origin = Get-AntigravityWebOrigin -Context $Context
     $rpcBase = "$origin/exa.language_server_pb.LanguageServerService/"
     $headers = @{ 'x-codeium-csrf-token' = $Context.CsrfToken; 'Connect-Protocol-Version' = '1' }
+    if ($Workflow) {
     $catalogBody = @{
         cascadeId = $Id; cascadeConfig = $config
         workspaceUris = $workspaces; projectId = $metadata.projectId
@@ -87,9 +88,11 @@ function Invoke-AntigravityWorkflow {
     if ($commands.Count -ne 1 -or $commands[0].info.type -notin @('SLASH_COMMAND_TYPE_SYSTEM', 1)) {
         throw "The requested workflow '$Workflow' is unavailable. No substitute was sent."
     }
+    $items = @(New-AntigravityWorkflowItems -Command $commands[0] -Prompt $Prompt)
+    } else { $items = @(@{text=$Prompt}) }
     $body = @{
         cascadeId = $Id; cascadeConfig = $config
-        items = @(New-AntigravityWorkflowItems -Command $commands[0] -Prompt $Prompt)
+        items = $items
     } | ConvertTo-Json -Depth 30 -Compress
     $sendResponse = Invoke-RestMethod -Uri ($rpcBase + 'SendUserCascadeMessage') -Method Post -Headers $headers `
         -ContentType 'application/json' -Body $body -SkipCertificateCheck -MaximumRedirection 0 -TimeoutSec 30
@@ -98,4 +101,41 @@ function Invoke-AntigravityWorkflow {
         command = $Workflow; conversation_id = $Id; transport = 'structured-app-rpc'
         submitted = $true; workspace_verified = $true
     }
+}
+
+function Invoke-AntigravityTaskState {
+    param($Context, [string]$Id, [switch]$Cancel)
+    $metadata = (Invoke-AgentApi -Context $Context -Arguments @('get-conversation-metadata',$Id)).response.conversationMetadata.metadata
+    $expected = [Uri]::new((Get-Location).Path.TrimEnd('\')+'\').AbsoluteUri.TrimEnd('/')
+    if (-not (@($metadata.workspaces.workspaceFolderAbsoluteUri) | Where-Object {$_.TrimEnd('/') -ieq $expected})) {
+        throw 'Conversation workspace mismatch; no status action was performed.'
+    }
+    $origin = Get-AntigravityWebOrigin -Context $Context
+    $rpc = "$origin/exa.language_server_pb.LanguageServerService/"
+    $headers = @{'x-codeium-csrf-token'=$Context.CsrfToken;'Connect-Protocol-Version'='1'}
+    $body = @{cascadeId=$Id}|ConvertTo-Json -Compress
+    if ($Cancel) {
+        $cancelBody = @{conversationId=$Id}|ConvertTo-Json -Compress
+        $response = Invoke-RestMethod -Uri ($rpc+'ForceStopCascadeTree') -Headers $headers -Method Post -Body $cancelBody -ContentType 'application/json' -SkipCertificateCheck -MaximumRedirection 0 -TimeoutSec 15
+        if ($response.error) { throw 'Antigravity rejected task cancellation.' }
+    }
+    $r = Invoke-RestMethod -Uri ($rpc+'GetCascadeTrajectory') -Headers $headers -Method Post -Body $body -ContentType 'application/json' -SkipCertificateCheck -MaximumRedirection 0 -TimeoutSec 15
+    if ($r.error -or -not $r.status) { throw 'Antigravity did not return a verifiable runtime status.' }
+    $steps = @($r.trajectory.steps)
+    while ($steps.Count -lt $r.numTotalSteps) {
+        $pageBody = @{cascadeId=$Id;stepOffset=$steps.Count}|ConvertTo-Json -Compress
+        $page = Invoke-RestMethod -Uri ($rpc+'GetCascadeTrajectorySteps') -Headers $headers -Method Post -Body $pageBody -ContentType 'application/json' -SkipCertificateCheck -MaximumRedirection 0 -TimeoutSec 15
+        if (-not $page.steps) { throw 'Incomplete trajectory; cannot verify the latest response.' }
+        $steps += @($page.steps)
+    }
+    $content=$null; $responseIndex=-1; $userIndex=-1; $hasError=$false
+    for ($i=0; $i -lt $steps.Count; $i++) {
+        $step=$steps[$i]
+        if ($step.type -eq 'CORTEX_STEP_TYPE_USER_INPUT') { $userIndex=$i; $content=$null; $responseIndex=-1; $hasError=$false }
+        if ($step.type -eq 'CORTEX_STEP_TYPE_PLANNER_RESPONSE' -and $step.status -eq 'CORTEX_STEP_STATUS_DONE' -and $step.plannerResponse.response) {
+            $content=$step.plannerResponse.response; $responseIndex=$i
+        }
+        if ($step.type -eq 'CORTEX_STEP_TYPE_ERROR_MESSAGE' -or $step.status -eq 'CORTEX_STEP_STATUS_ERROR') { $hasError=$true }
+    }
+    [pscustomobject]@{conversation_id=$Id;run_status=$r.status;step_count=$steps.Count;latest_user_index=$userIndex;response_index=$responseIndex;content=$content;has_error=$hasError;cancel_requested=[bool]$Cancel;workspace_verified=$true}
 }

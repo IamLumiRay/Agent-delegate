@@ -4,6 +4,8 @@ Perform this setup only for an unregistered target. Target configuration identif
 
 Resolve `<skill>` to this skill's installed directory and choose the intended provider. Read routing metadata only; do not search credential stores or unrelated conversations.
 
+Configure [local state and Git](#local-state-and-git) before storing mappings or task receipts.
+
 ## Antigravity
 
 1. Start Antigravity, sign in, and open the intended workspace.
@@ -55,3 +57,15 @@ For an inference check, start a read-only, no-tools nonce task, then resume its 
 Keep these records under a private `.agent-delegate/` directory or another ignored location. Reuse a registered target across tasks; reuse a conversation only when continuing that task. Recheck changed routing or identity instead of rescanning all chats.
 
 The release includes empty `*.example.json` templates. Real mappings, fingerprints, receipts, and conversation IDs stay local.
+
+## Local state and Git
+
+The skill's `.gitignore` applies only inside its installed directory. For receipts stored at `<workspace>/.agent-delegate/`, add this rule to the workspace repository's `.gitignore` or its local `.git/info/exclude` before the first task:
+
+```gitignore
+/.agent-delegate/
+```
+
+For a custom state directory or mappings outside the skill, exclude their actual paths in each containing repository, or keep them outside Git repositories. This also applies to MCP's `--state-dir`.
+
+Verify a receipt's relative path with `git -C "<workspace>" check-ignore --no-index -- "<receipt-relative-path>"`; it must print that path. Ignore rules do not protect already tracked files: `git -C "<workspace>" ls-files -- ".agent-delegate/"` must be empty. Check the corresponding paths when using custom storage.

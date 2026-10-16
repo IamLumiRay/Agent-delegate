@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('doctor', 'register', 'new', 'send', 'metadata', 'result')]
+    [ValidateSet('doctor', 'register', 'new', 'send', 'metadata', 'result', 'status', 'cancel')]
     [string]$Action,
 
     [ValidateSet('pro', 'flash', 'flash_lite', 'gemini-3.8-flash', 'argon', 'gemini-4-argon')]
@@ -14,6 +14,8 @@ param(
     [string]$Workflow,
 
     [string]$Prompt,
+    [string]$PromptFile,
+    [switch]$Structured,
     [string]$Title = 'Codex delegated task',
     [string]$ConversationId,
     [string]$ProjectId,
@@ -21,12 +23,14 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Prompt -and $PromptFile) { throw 'Use -Prompt or -PromptFile, not both.' }
+if ($PromptFile) { $Prompt = [IO.File]::ReadAllText([IO.Path]::GetFullPath($PromptFile),[Text.Encoding]::UTF8) }
 
 . (Join-Path $PSScriptRoot 'antigravity_workflows.ps1')
 if ($Workflow -and $Action -notin @('new', 'send')) { throw '-Workflow is only supported for new or send.' }
 if ($Action -in @('new', 'send')) {
     $workflowPrompt = Resolve-AntigravityWorkflowPrompt -Prompt $Prompt -Workflow $Workflow
-    $Workflow = $workflowPrompt.Workflow
+    if ($workflowPrompt.Workflow) { $Workflow = $workflowPrompt.Workflow }
     $Prompt = $workflowPrompt.Prompt
 }
 
@@ -345,6 +349,11 @@ if ($Action -eq 'result') {
 }
 
 $context = Get-AntigravityContext
+if ($Action -in @('status','cancel')) {
+    if (-not (Test-ProjectId -Value $ConversationId)) { throw 'A conversation UUID is required.' }
+    Invoke-AntigravityTaskState -Context $context -Id $ConversationId -Cancel:($Action -eq 'cancel') | ConvertTo-Json -Depth 5
+    exit 0
+}
 
 if ($Action -eq 'doctor') {
     [pscustomobject]@{
@@ -402,7 +411,7 @@ switch ($Action) {
         if (-not $ConversationId -or -not $Prompt) {
             throw '-ConversationId and -Prompt are required for Action=send.'
         }
-        if ($Workflow) {
+        if ($Workflow -or $Structured) {
             $receipt = Invoke-AntigravityWorkflow -Context $context -Id $ConversationId -Workflow $Workflow -Prompt $Prompt
             $result = [pscustomobject]@{ workflow = $receipt }
             break

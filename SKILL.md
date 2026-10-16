@@ -1,18 +1,26 @@
 ---
 name: agent-delegate
-description: Delegate bounded tasks to Antigravity/Gemini or a separately authenticated Codex profile, resume its conversation, and verify the result. Use for external agent delegation or Codex A calling Codex B.
+description: Delegate bounded tasks to Antigravity or a separate Codex profile when requested, or when independent review, parallel work, or a known target capability justifies delegation. Resume conversations and verify results.
 license: MIT
 ---
 
 # Agent Delegate
 
-Delegate to the requested provider and account; verify the returned result.
+Decide whether delegation helps, select an appropriate target, and verify its result.
+
+## Delegation decision
+
+- Handle simple or tightly coupled work locally. Delegate self-contained work when independent verification, parallel progress, or a known target capability outweighs startup and coordination cost.
+- Honor explicit provider, account, model, and delegation preferences. Otherwise, choose among registered targets using known capabilities, workspace access, and current availability; use provider checks instead of inferring capability from a model name.
+- Stay within the user's authorized scope and budget. If no suitable target is available, continue locally when feasible; report the limitation when delegation is required.
+- Keep coordination with the caller. Include caller/target context in the task brief; do not route work back along its delegation chain. Duplicate work only for deliberate independent checks, and retry failed delegation only when new evidence warrants it.
 
 ## Select the provider
 
 - **Antigravity / Gemini:** [antigravity.md](references/antigravity.md).
 - **Codex profile:** [codex.md](references/codex.md). Runs a separate app-server under the selected profile, without attaching to its desktop window.
 - **First use:** register the target with [setup.md](references/setup.md), then reuse its mapping.
+- **MCP available:** use its five task tools with [mcp.md](references/mcp.md); otherwise use the helper scripts below.
 
 ## Workflow
 

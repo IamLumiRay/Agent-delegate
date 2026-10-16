@@ -23,6 +23,10 @@ class DelegateError(RuntimeError):
     pass
 
 
+class DelegateCancelled(DelegateError):
+    pass
+
+
 def emit(value):
     print(json.dumps(value, ensure_ascii=False), flush=True)
 
@@ -91,10 +95,15 @@ class Client:
         self.process.stdin.flush()
 
     def _receive(self, deadline):
+        remaining = deadline-time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Codex response deadline exceeded.')
         try:
-            message = self.queue.get(timeout=max(.001, deadline-time.monotonic()))
+            message = self.queue.get(timeout=remaining)
         except queue.Empty:
             raise TimeoutError('Codex response deadline exceeded.') from None
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Codex response deadline exceeded.')
         if message is None:
             raise DelegateError('Codex app-server exited before completing the request.')
         if 'id' in message and 'method' in message:
@@ -121,6 +130,8 @@ class Client:
             self.pending.append(message)
 
     def event(self, deadline):
+        if time.monotonic() >= deadline:
+            raise TimeoutError('Codex response deadline exceeded.')
         return self.pending.popleft() if self.pending else self._receive(deadline)
 
     def close(self):
@@ -219,7 +230,7 @@ def task_mode(prompt, explicit):
     return prompt, explicit
 
 
-def run(args):
+def run(args, notify=emit, cancelled=None):
     if args.action == 'discover':
         registry = Path.home()/'.cockpit_tools/codex_instances.json'
         data = json.loads(registry.read_text(encoding='utf-8')) if registry.exists() else {}
@@ -237,7 +248,7 @@ def run(args):
         _, record = load_record(args)
         if args.action == 'result' and record['status'] != 'completed':
             raise DelegateError('No successfully completed result; status='+record['status'])
-        emit(public_record(record, args.action == 'result'))
+        notify(public_record(record, args.action == 'result'))
         return
     resolve_target(args)
     if args.action != 'doctor' and not args.expected_account:
@@ -335,12 +346,23 @@ def run(args):
             turn_id = response['turn']['id']
         record['turn_id'] = turn_id
         write_json(path, record)
-        emit({'event': 'dispatched', **public_record(record, False)})
+        notify({'event': 'dispatched', **public_record(record, False)})
         deadline = time.monotonic()+args.timeout
         visible = []
         compacted = False
         while True:
-            message = client.event(deadline)
+            if cancelled and cancelled():
+                raise DelegateCancelled('Task cancellation requested.')
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Codex response deadline exceeded.')
+            try:
+                message = client.event(min(deadline, time.monotonic()+.5) if cancelled else deadline)
+            except TimeoutError:
+                if not cancelled or time.monotonic() >= deadline:
+                    raise
+                continue
+            if time.monotonic() >= deadline:
+                raise TimeoutError('Codex response deadline exceeded.')
             params = message.get('params') or {}
             if params.get('threadId') != thread_id:
                 continue
@@ -377,27 +399,63 @@ def run(args):
                 if record.get('title'):
                     try:
                         client.rpc('thread/name/set', {'threadId': thread_id, 'name': record['title']})
-                    except DelegateError:
+                    except Exception:
                         record['title_verified'] = False
                     else:
                         record['title_verified'] = True
                     write_json(path, record)
-                emit({'event': 'completed', **public_record(record)})
+                notify({'event': 'completed', **public_record(record)})
                 return
     except BaseException as error:
-        if record and path and lock:
+        if record and path and lock and record.get('status') != 'completed':
             if record.get('status') == 'running':
+                stopped = False
                 try:
                     client.rpc('turn/interrupt', {'threadId': record['conversation_id'], 'turnId': record['turn_id']}, timeout=5)
-                except Exception:
-                    pass
-                record['status'] = 'timed_out' if isinstance(error, TimeoutError) else 'failed'
+                    if isinstance(error, DelegateCancelled):
+                        stop_deadline = time.monotonic()+5
+                        while True:
+                            event = client.event(stop_deadline)
+                            p = event.get('params') or {}
+                            if (event.get('method') == 'turn/completed' and
+                                p.get('threadId') == record['conversation_id'] and
+                                p.get('turn', {}).get('id') == record['turn_id']):
+                                stopped = p['turn'].get('status') == 'interrupted'
+                                break
+                except Exception as interrupt_error:
+                    record['interruption_error'] = str(interrupt_error)[:300]
+                if isinstance(error, DelegateCancelled) and not stopped:
+                    try:
+                        snapshot = client.rpc('thread/read', {'threadId':record['conversation_id'],'includeTurns':True}, timeout=5)
+                        record['interruption_turn_states'] = [{'id':t.get('id'),'status':t.get('status')} for t in snapshot.get('thread',{}).get('turns',[])]
+                        stopped = any(turn.get('id') == record.get('turn_id') and turn.get('status') == 'interrupted'
+                                      for turn in snapshot.get('thread',{}).get('turns',[]))
+                    except Exception as snapshot_error:
+                        record['interruption_snapshot_error'] = str(snapshot_error)[:300]
+                record['interruption_confirmed'] = stopped
+                record['status'] = (('cancelled' if stopped else 'unknown') if isinstance(error, DelegateCancelled) else
+                                    'timed_out' if isinstance(error, TimeoutError) else 'failed')
             record['content'] = None
             record['error_type'] = type(error).__name__
             write_json(path, record)
         raise
     finally:
         client.close()
+        if record and path and record.get('status') == 'unknown' and record.get('error_type') == 'DelegateCancelled':
+            verifier = None
+            try:
+                verifier = Client(args.codex_home, args.codex_bin)
+                checked = identity(verifier.rpc('account/read', {'refreshToken':False}))
+                if checked['account_fingerprint'] == record['account_fingerprint']:
+                    snapshot = verifier.rpc('thread/read', {'threadId':record['conversation_id'],'includeTurns':True})
+                    if any(t.get('id') == record.get('turn_id') and t.get('status') == 'interrupted'
+                           for t in snapshot.get('thread',{}).get('turns',[])):
+                        record.update(status='cancelled',interruption_confirmed=True)
+                        write_json(path,record)
+            except Exception:
+                pass
+            finally:
+                if verifier: verifier.close()
         if lock:
             lock.close()
             lock_path.unlink(missing_ok=True)
