@@ -8,7 +8,7 @@ The calling agent can decide whether delegation helps, send a task, continue the
 
 ## Quick start
 
-1. Download and extract `agent-delegate.zip`, or copy this repository's contents into a directory named `agent-delegate`.
+1. On GitHub, select **Code → Download ZIP** and extract the archive, or clone this repository. Rename the resulting directory to `agent-delegate`.
 2. Place that directory in `~/.agents/skills/` for user installation, or `.agents/skills/` inside a repository. Use your client's supported skill directory if it differs.
 3. Ask your agent to perform the [one-time target setup](references/setup.md), then delegate a task:
 
