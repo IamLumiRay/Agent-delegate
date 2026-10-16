@@ -1,0 +1,7 @@
+codex-targets.json
+projects.json
+__pycache__/
+.agent-delegate/
+*.py[cod]
+*.lock
+dist/

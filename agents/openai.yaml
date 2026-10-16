@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Delegate"
+  short_description: "Delegate to Antigravity or an independent Codex account"
+  default_prompt: "Use $agent-delegate to send this bounded task to the requested external agent and verify its result."
