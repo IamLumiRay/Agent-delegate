@@ -1,51 +1,51 @@
 # Agent Delegate
 
-A local agent skill for delegating bounded tasks to Antigravity/Gemini or an independently authenticated Codex profile, continuing the same conversation, and checking the result.
+**Let your agent call another agent through a skill.**
 
-## Capabilities
+Delegate work to Antigravity or a separately signed-in Codex profile using the local tools you already have. Install the skill, register a target once, and ask in natural language. No microservices, Docker deployment, or separate orchestration gateway are required.
 
-| Provider | Connection | Reusable local configuration |
-| --- | --- | --- |
-| Antigravity | Running Agent API; structured Plan, Grill-me, Boost, and Teamwork workflows | Workspace-to-project mapping |
-| Codex | Separate `codex app-server`; native Plan, Review, Compact, and continuation | Named target with home path and account fingerprint |
+The calling agent can send a task, continue the same conversation, retrieve the answer, and verify the result. Local target mappings are reused across tasks.
 
-Codex delegation uses the selected profile's account and creates an independent conversation. It does not attach to an existing desktop window. The Antigravity adapter currently requires Windows; its internal local API may change after app updates.
+## Quick start
 
-## Requirements
-
-- A client supporting local agent skills.
-- PowerShell 7 for the shared entry point and Antigravity adapter.
-- Antigravity installed, running, and signed in for that provider.
-- Python 3.10+ and Codex CLI with `app-server` for the Codex adapter. The Python helpers require no third-party packages.
-
-## Install
-
-Download and extract `agent-delegate.zip`, or copy this repository's contents into a directory named `agent-delegate`. Place that directory in `~/.agents/skills/` for user installation, or `.agents/skills/` inside a repository. A client with a different supported skill directory can use that location instead. See the [official skill documentation](https://learn.chatgpt.com/docs/build-skills).
-
-Invoke the installed skill:
+1. Download and extract `agent-delegate.zip`, or copy this repository's contents into a directory named `agent-delegate`.
+2. Place that directory in `~/.agents/skills/` for user installation, or `.agents/skills/` inside a repository. Use your client's supported skill directory if it differs.
+3. Ask your agent to perform the [one-time target setup](references/setup.md), then delegate a task:
 
 ```text
-$agent-delegate Use Antigravity to review these files without editing them, then verify the findings.
-$agent-delegate Ask Codex target codex-b to investigate this issue in the specified workspace.
+$agent-delegate Set up Antigravity for this workspace using the setup guide.
+$agent-delegate Ask Antigravity to review these files without editing them, then verify its findings.
+$agent-delegate Ask Codex target codex-b to plan this change.
 ```
 
-## Set up once, reuse afterward
+For a follow-up, ask the calling agent to continue the same task; it reuses the saved conversation ID and receipt.
 
-Ask the calling agent to follow [references/setup.md](references/setup.md). It locates the selected target, verifies its identity/workspace, and registers nonsecret routing data locally. Future tasks reuse the mapping. Each task returns a conversation ID; preserve it and its receipt for follow-ups.
+## What needs to be running?
 
-- `projects.json`: local Antigravity workspace routing.
-- `codex-targets.json`: local Codex target names, home paths, and hashed account pins.
-- `.agent-delegate/`: private task handles and runtime receipts.
+| Target | Before delegation | How it connects |
+| --- | --- | --- |
+| Antigravity | Keep Antigravity running, signed in, with the intended workspace open. | Uses the app's existing local Agent API. |
+| Codex | Install Codex CLI and prepare a separately signed-in Codex home. The target desktop window can stay closed. | Starts its own `codex app-server` process under that profile and closes it after the call. |
 
-These files are ignored and excluded from releases. Start from the empty example JSON files if a custom config location is needed; never put real configuration into the examples.
+Each target needs a one-time local registration. Codex tasks run in independent conversations under the selected profile; this does not control an existing desktop chat. See [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server) for the underlying protocol.
 
-## Usage references
+## Supported workflows
 
-- [Antigravity models, dispatch, and common workflows](references/antigravity.md)
-- [Codex execution, common commands, and continuation](references/codex.md)
-- [First-run discovery and registration](references/setup.md)
+Ordinary delegation needs no special command. For a specific workflow:
 
-The shared entry point is `scripts/invoke_agent.ps1`. The provider helpers can also be called directly. Tasks default to read-only scope; give explicit edit permissions and separate files/workspaces for write tasks.
+- **Antigravity:** Plan, Grill-me, Boost, and Teamwork scoping. See [Antigravity usage](references/antigravity.md).
+- **Codex:** Plan, Review, Compact, and conversation continuation. See [Codex usage](references/codex.md).
+
+The helper translates supported commands to provider operations. Teamwork starts with scoping; verify its later execution separately.
+
+## Requirements and limits
+
+- A local agent client that can load skills and run helper scripts.
+- PowerShell 7 for the shared entry point and Antigravity adapter. The Antigravity adapter currently requires Windows.
+- Python 3.10+ and Codex CLI with `app-server` for Codex delegation. No third-party Python packages are required.
+- Tasks default to read-only scope. Authorize edits explicitly; use an interactive client when provider approval or user input is needed.
+
+Target mappings (`projects.json`, `codex-targets.json`) and task receipts (`.agent-delegate/`) stay local and are ignored by Git. Authentication remains with the provider. App/API changes may require adapter updates.
 
 Vendor applications and binaries are not bundled. This project is independent of OpenAI and Google.
 
