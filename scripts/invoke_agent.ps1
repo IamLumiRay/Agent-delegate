@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('codex','antigravity')][string]$Provider,
+    [Parameter(Mandatory)][ValidateSet('codex','antigravity','deepseek')][string]$Provider,
     [Parameter(Mandatory)][ValidateSet('discover','doctor','register','new','send','compact','metadata','result')][string]$Action,
     [string]$Target, [string]$CodexHome, [string]$ExpectedAccount,
     [string]$Prompt, [string]$PromptFile, [string]$ConversationId,
@@ -10,11 +10,30 @@ param(
     [ValidateSet('default','plan','review')][string]$Mode,
     [ValidateRange(1,1200)][int]$TimeoutSeconds = 1200,
     [string]$ProjectId, [string]$ArgonApiModel, [string]$PythonPath,
+    [string]$DeepSeekCli, [string]$DeepSeekHome,
+    [ValidateSet('deepseek-account','deepseek-official')][string]$ProviderRoute,
     [ValidateSet('plan','grill-me','teamwork-preview','boost')][string]$Workflow
 )
 $ErrorActionPreference = 'Stop'
 
 if ($Prompt -and $PromptFile) { throw 'Use -Prompt or -PromptFile, not both.' }
+if ($Provider -eq 'deepseek') {
+    if ($Action -eq 'compact' -or $CodexHome -or $ExpectedAccount -or $Mode -or $ProjectId -or $ArgonApiModel -or $Workflow -or $Title) {
+        throw 'DeepSeek accepts its target, runtime, model and scope options; Codex modes and Antigravity workflows are unsupported.'
+    }
+    $python = if ($PythonPath) { $PythonPath } elseif ($env:AGENT_DELEGATE_PYTHON) { $env:AGENT_DELEGATE_PYTHON } else { (Get-Command python -ErrorAction Stop).Source }
+    $arguments = @((Join-Path $PSScriptRoot 'invoke_deepseek.py'), $Action)
+    $values = @{
+        '--target'=$Target; '--dsh-bin'=$DeepSeekCli; '--dsh-home'=$DeepSeekHome; '--provider-route'=$ProviderRoute;
+        '--prompt'=$Prompt; '--prompt-file'=$PromptFile; '--conversation-id'=$ConversationId;
+        '--cwd'=$Workspace; '--state-dir'=$StateDir; '--model'=$Model; '--effort'=$Effort
+    }
+    foreach ($key in $values.Keys) { if ($values[$key]) { $arguments += @($key, $values[$key]) } }
+    $arguments += @('--sandbox', $Sandbox, '--timeout', [string]$TimeoutSeconds)
+    & $python '-B' @arguments
+    exit $LASTEXITCODE
+}
+if ($DeepSeekCli -or $DeepSeekHome -or $ProviderRoute) { throw 'DeepSeek runtime options require -Provider deepseek.' }
 if ($Provider -eq 'codex') {
     if ($ProjectId -or $ArgonApiModel -or $Workflow) {
         throw '-ProjectId, -ArgonApiModel and -Workflow belong to the Antigravity backend.'
@@ -30,7 +49,7 @@ if ($Provider -eq 'codex') {
         if ($values[$key]) { $arguments += @($key, $values[$key]) }
     }
     $arguments += @('--sandbox', $Sandbox, '--timeout', [string]$TimeoutSeconds)
-    & $python @arguments
+    & $python '-B' @arguments
     exit $LASTEXITCODE
 }
 

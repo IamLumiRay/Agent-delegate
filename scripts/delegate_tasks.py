@@ -11,6 +11,7 @@ import time
 import uuid
 
 import invoke_codex as codex
+import invoke_deepseek as deepseek
 
 ACTIVE = {'queued', 'running', 'cancelling'}
 PUBLIC = ('task_id', 'provider', 'target', 'workspace', 'conversation_id', 'status',
@@ -22,10 +23,11 @@ def scrub(error):
 
 
 class TaskManager:
-    def __init__(self, skill, state, targets=None, projects=None):
+    def __init__(self, skill, state, targets=None, projects=None, deepseek_targets=None):
         self.skill, self.state = Path(skill).resolve(), Path(state).resolve()
         self.targets = Path(targets or self.skill/'codex-targets.json').resolve()
         self.projects = Path(projects or self.skill/'projects.json').resolve()
+        self.deepseek_targets = Path(deepseek_targets or self.skill/'deepseek-targets.json').resolve()
         self.state.mkdir(parents=True, exist_ok=True)
         self.guard = threading.RLock()
         self.workers, self.records = {}, {}
@@ -97,6 +99,18 @@ class TaskManager:
                 finally:
                     if client: client.close()
             result.append(entry)
+        for name, target in self.read_config(self.deepseek_targets, 'targets').items():
+            entry = {'provider':'deepseek', 'target':name, 'available':None,
+                     'model':target['model'], 'workflows':['default','continuation']}
+            if check_health:
+                try:
+                    args = deepseek.parser().parse_args(['doctor','--target',name,'--targets-file',str(self.deepseek_targets)])
+                    health = []
+                    deepseek.run(args,notify=health.append)
+                    entry['available'] = bool(health and health[-1].get('available'))
+                except Exception as error:
+                    entry.update(available=False,error=scrub(error))
+            result.append(entry)
         for workspace in self.read_config(self.projects, 'projects'):
             entry = {'provider':'antigravity', 'workspace':workspace, 'available':None,
                      'workflows':['plan','grill-me','boost','teamwork-preview']}
@@ -118,6 +132,9 @@ class TaskManager:
         if provider == 'codex':
             if not target or target not in self.read_config(self.targets, 'targets'):
                 raise ValueError('Select a registered Codex target from list_agents.')
+        elif provider == 'deepseek':
+            if not target or target not in self.read_config(self.deepseek_targets, 'targets'):
+                raise ValueError('Select a registered DeepSeek Harness target from list_agents.')
         else:
             if target: raise ValueError('Antigravity uses its registered workspace, not a Codex target name.')
             mappings = self.read_config(self.projects, 'projects')
@@ -137,13 +154,15 @@ class TaskManager:
 
     @staticmethod
     def validate(provider, prompt, mode, workflow, timeout):
-        if provider not in ('codex','antigravity'): raise ValueError('Unknown provider.')
+        if provider not in ('codex','antigravity','deepseek'): raise ValueError('Unknown provider.')
         if not isinstance(prompt,str) or not prompt.strip(): raise ValueError('A nonempty prompt is required.')
         if not 1 <= timeout <= 1200: raise ValueError('timeout_seconds must be 1..1200.')
         if provider == 'codex' and (workflow or mode not in (None,'default','plan','review','compact')):
             raise ValueError('Codex accepts mode, not an Antigravity workflow.')
         if provider == 'antigravity' and (mode or workflow not in (None,'plan','grill-me','boost','teamwork-preview')):
             raise ValueError('Antigravity accepts workflow, not a Codex mode.')
+        if provider == 'deepseek' and (mode or workflow):
+            raise ValueError('DeepSeek supports ordinary tasks and continuation, not other providers\' modes or workflows.')
         if provider == 'antigravity' and prompt.lstrip().startswith(('/goal','/schedule','/learn')):
             raise ValueError('Persistent goals, schedules and learning are outside these bounded MCP tasks.')
 
@@ -184,20 +203,23 @@ class TaskManager:
                 if event.is_set():
                     self.update(record,status='cancelled'); return
                 self.update(record,status='running')
-            prompt += ('\n\nDelegation scope: '+
-                       ('Edits are authorized only inside the specified workspace.' if record['allow_writes'] else
-                        'Read-only task. Do not modify workspace files.')+
-                       ' Return the result to the caller. Do not delegate this task back to its caller.')
+            if record['provider'] != 'deepseek':
+                prompt += ('\n\nDelegation scope: '+
+                           ('Edits are authorized only inside the specified workspace.' if record['allow_writes'] else
+                            'Read-only task. Do not modify workspace files.')+
+                           ' Return the result to the caller. Do not delegate this task back to its caller.')
             if record['provider'] == 'codex': self.run_codex(record,prompt,continuation,event)
+            elif record['provider'] == 'deepseek': self.run_deepseek(record,prompt,continuation,event)
             else: self.run_antigravity(record,prompt,continuation,event)
         except Exception as error:
-            if record['provider'] == 'codex' and record.get('conversation_id'):
-                receipt = self.state/'codex'/(record['conversation_id']+'.json')
+            if record['provider'] in ('codex','deepseek') and record.get('conversation_id'):
+                receipt = (deepseek.state_path(self.state/'deepseek',record['conversation_id']) if record['provider']=='deepseek' else
+                           self.state/'codex'/(record['conversation_id']+'.json'))
                 if receipt.exists():
                     state = json.loads(receipt.read_text(encoding='utf-8')).get('status')
                 else: state='failed'
             else: state='unknown' if record.get('conversation_id') else 'failed'
-            self.update(record,status=state if state not in ACTIVE else 'unknown',content=None,error=scrub(error))
+            self.update(record,status='failed' if state=='completed' else state if state not in ACTIVE else 'unknown',content=None,error=scrub(error))
 
     def run_codex(self, record, prompt, continuation, event):
         action = 'send' if continuation else 'new'
@@ -216,6 +238,23 @@ class TaskManager:
             if value.get('event') == 'completed': completed.update(changes)
             else: self.update(record,phase='submitted',**changes)
         codex.run(args,notify=receive,cancelled=event.is_set)
+        self.update(record,**completed)
+
+    def run_deepseek(self, record, prompt, continuation, event):
+        values = ['send' if continuation else 'new','--target',record['target'],
+                  '--targets-file',str(self.deepseek_targets),'--cwd',record['workspace'],
+                  '--state-dir',str(self.state/'deepseek'),'--prompt',prompt,
+                  '--sandbox','workspace-write' if record['allow_writes'] else 'read-only',
+                  '--timeout',str(record['timeout_seconds'])]
+        if record.get('model'): values += ['--model',record['model']]
+        if continuation: values += ['--conversation-id',record['conversation_id']]
+        args = deepseek.parser().parse_args(values)
+        completed = {}
+        def receive(value):
+            changes = {key:value[key] for key in ('conversation_id','status','content','model') if key in value}
+            if value.get('event') == 'completed': completed.update(changes)
+            else: self.update(record,phase='submitted',**changes)
+        deepseek.run(args,notify=receive,cancelled=event.is_set)
         self.update(record,**completed)
 
     def anti_call(self, workspace, action, conversation_id=None, prompt=None, model=None, workflow=None):

@@ -1,6 +1,6 @@
 ---
 name: agent-delegate
-description: Delegate bounded tasks to Antigravity or a separate Codex profile when requested, or when independent review, parallel work, or a known target capability justifies delegation. Resume conversations and verify results.
+description: Delegate bounded tasks to Antigravity, a separate Codex profile, or DeepSeek Harness when requested, or when independent review, parallel work, or target capabilities justify delegation. Resume conversations and verify results.
 license: MIT
 ---
 
@@ -19,6 +19,7 @@ Decide whether delegation helps, select an appropriate target, and verify its re
 
 - **Antigravity / Gemini:** [antigravity.md](references/antigravity.md).
 - **Codex profile:** [codex.md](references/codex.md). Runs a separate app-server under the selected profile, without attaching to its desktop window.
+- **DeepSeek Harness:** [deepseek.md](references/deepseek.md). Uses the installed SDK CLI and native login, with an owned runtime for each task.
 - **First use:** register the target with [setup.md](references/setup.md), then reuse its mapping.
 - **MCP available:** use its five task tools with [mcp.md](references/mcp.md); otherwise use the helper scripts below.
 

@@ -1,4 +1,4 @@
 interface:
   display_name: "Agent Delegate"
-  short_description: "Delegate to Antigravity or an independent Codex account"
+  short_description: "Delegate to Antigravity, Codex, or DeepSeek Harness"
   default_prompt: "Use $agent-delegate to decide whether this task benefits from delegation, choose an appropriate target within my instructions, and verify any delegated result."

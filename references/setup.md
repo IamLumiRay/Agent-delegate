@@ -49,10 +49,24 @@ Use `--targets-file` if the target registry must live outside the installed skil
 
 For an inference check, start a read-only, no-tools nonce task, then resume its conversation from a fresh helper process and verify the returned nonce. Login/model-list success alone does not verify inference.
 
+## DeepSeek Harness
+
+Use an existing signed-in Harness home and installed SDK CLI. Locate `dsh` on PATH or use Desktop's bundled `resources/runtime/cli/bin/dsh.cmd` on Windows. Registering the command on PATH is optional.
+
+Verify and register an available exact model. Authentication stays with Harness:
+
+```powershell
+python -B "<skill>/scripts/invoke_deepseek.py" doctor --dsh-bin "<dsh command>" --dsh-home "<Harness home>" --model deepseek-flash
+python -B "<skill>/scripts/invoke_deepseek.py" register --target deepseek-main --dsh-bin "<dsh command>" --dsh-home "<Harness home>" --model deepseek-flash
+```
+
+The default home is `DSH_HOME` or `~/.dsh`; the default route is `deepseek-account`. `--provider-route deepseek-official` explicitly selects native API-key authentication instead. Initialization verifies runtime identity and route/model readiness, not inference; finish with a read-only nonce task and exact-session continuation. Reuse `--target deepseek-main` afterwards. `deepseek-targets.json` stores routing and model metadata; an existing different mapping is not overwritten.
+
 ## Preserve task handles
 
 - **Antigravity:** save the returned `conversationId`, workspace, and provider in an ignored local task record. Continue it with `send -ConversationId` and verify its metadata.
 - **Codex:** keep the receipt directory and conversation ID. Receipts already retain the target home, fingerprint, workspace, and current turn status.
+- **DeepSeek Harness:** keep the receipt directory and session handle. Continuation preserves command, home, route, workspace, model and scope.
 
 Keep these records under a private `.agent-delegate/` directory or another ignored location. Reuse a registered target across tasks; reuse a conversation only when continuing that task. Recheck changed routing or identity instead of rescanning all chats.
 
