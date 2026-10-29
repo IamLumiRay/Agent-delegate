@@ -62,11 +62,23 @@ python -B "<skill>/scripts/invoke_deepseek.py" register --target deepseek-main -
 
 The default home is `DSH_HOME` or `~/.dsh`; the default route is `deepseek-account`. `--provider-route deepseek-official` explicitly selects native API-key authentication instead. Initialization verifies runtime identity and route/model readiness, not inference; finish with a read-only nonce task and exact-session continuation. Reuse `--target deepseek-main` afterwards. `deepseek-targets.json` stores routing and model metadata; an existing different mapping is not overwritten.
 
+## Claude Code
+
+Use an installed, signed-in Claude CLI. `discover` checks PATH; on Windows the helper resolves the official npm wrapper to its native executable without invoking a command shell.
+
+```powershell
+python -B "<skill>/scripts/invoke_claude.py" doctor --claude-bin "<Claude executable or official wrapper>"
+python -B "<skill>/scripts/invoke_claude.py" register --target claude-main --claude-bin "<Claude executable or official wrapper>"
+```
+
+Leave `--claude-home` omitted for the normal login; use it only for a deliberately selected existing profile. Registration retains CLI/home routing, a fingerprint of nonsecret native authentication metadata and an optional `--model`. It never copies credentials or overwrites a different mapping. Without a model option, the first task uses the CLI default and continuation pins its resolved model. Verify inference and exact-session continuation with a small read-only task; `doctor` checks login and CLI features only.
+
 ## Preserve task handles
 
 - **Antigravity:** save the returned `conversationId`, workspace, and provider in an ignored local task record. Continue it with `send -ConversationId` and verify its metadata.
 - **Codex:** keep the receipt directory and conversation ID. Receipts already retain the target home, fingerprint, workspace, and current turn status.
 - **DeepSeek Harness:** keep the receipt directory and session handle. Continuation preserves command, home, route, workspace, model and scope.
+- **Claude Code:** keep the receipt directory and returned UUID. Resume only that completed conversation with its recorded CLI, home, authentication metadata, workspace, model and tool scope.
 
 Keep these records under a private `.agent-delegate/` directory or another ignored location. Reuse a registered target across tasks; reuse a conversation only when continuing that task. Recheck changed routing or identity instead of rescanning all chats.
 

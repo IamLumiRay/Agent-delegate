@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('codex','antigravity','deepseek')][string]$Provider,
+    [Parameter(Mandatory)][ValidateSet('codex','antigravity','deepseek','claude')][string]$Provider,
     [Parameter(Mandatory)][ValidateSet('discover','doctor','register','new','send','compact','metadata','result')][string]$Action,
     [string]$Target, [string]$CodexHome, [string]$ExpectedAccount,
     [string]$Prompt, [string]$PromptFile, [string]$ConversationId,
@@ -11,12 +11,30 @@ param(
     [ValidateRange(1,1200)][int]$TimeoutSeconds = 1200,
     [string]$ProjectId, [string]$ArgonApiModel, [string]$PythonPath,
     [string]$DeepSeekCli, [string]$DeepSeekHome,
+    [string]$ClaudeCli, [string]$ClaudeHome,
     [ValidateSet('deepseek-account','deepseek-official')][string]$ProviderRoute,
     [ValidateSet('plan','grill-me','teamwork-preview','boost')][string]$Workflow
 )
 $ErrorActionPreference = 'Stop'
 
 if ($Prompt -and $PromptFile) { throw 'Use -Prompt or -PromptFile, not both.' }
+if ($Provider -eq 'claude') {
+    if ($Action -eq 'compact' -or $CodexHome -or $ExpectedAccount -or $Mode -or $ProjectId -or $ArgonApiModel -or $Workflow -or $Title -or $DeepSeekCli -or $DeepSeekHome -or $ProviderRoute) {
+        throw 'Claude accepts its target, runtime, model and scope options; other provider workflows are unsupported.'
+    }
+    $python = if ($PythonPath) { $PythonPath } elseif ($env:AGENT_DELEGATE_PYTHON) { $env:AGENT_DELEGATE_PYTHON } else { (Get-Command python -ErrorAction Stop).Source }
+    $arguments = @((Join-Path $PSScriptRoot 'invoke_claude.py'), $Action)
+    $values = @{
+        '--target'=$Target; '--claude-bin'=$ClaudeCli; '--claude-home'=$ClaudeHome;
+        '--prompt'=$Prompt; '--prompt-file'=$PromptFile; '--conversation-id'=$ConversationId;
+        '--cwd'=$Workspace; '--state-dir'=$StateDir; '--model'=$Model; '--effort'=$Effort
+    }
+    foreach ($key in $values.Keys) { if ($values[$key]) { $arguments += @($key, $values[$key]) } }
+    $arguments += @('--sandbox', $Sandbox, '--timeout', [string]$TimeoutSeconds)
+    & $python '-B' @arguments
+    exit $LASTEXITCODE
+}
+if ($ClaudeCli -or $ClaudeHome) { throw 'Claude runtime options require -Provider claude.' }
 if ($Provider -eq 'deepseek') {
     if ($Action -eq 'compact' -or $CodexHome -or $ExpectedAccount -or $Mode -or $ProjectId -or $ArgonApiModel -or $Workflow -or $Title) {
         throw 'DeepSeek accepts its target, runtime, model and scope options; Codex modes and Antigravity workflows are unsupported.'

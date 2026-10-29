@@ -17,16 +17,16 @@ def create_server(manager):
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True),structured_output=True)
     async def list_agents(check_health: bool=False) -> dict[str, Any]:
-        """List registered Codex/DeepSeek targets and Antigravity workspaces. Optional health checks use their existing authentication."""
+        """List registered Codex, DeepSeek and Claude targets plus Antigravity workspaces. Health checks use native authentication."""
         return await anyio.to_thread.run_sync(lambda:manager.list_agents(check_health))
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=False),structured_output=True)
-    async def delegate_task(provider: Literal['codex','antigravity','deepseek'], workspace: str, prompt: str,
+    async def delegate_task(provider: Literal['codex','antigravity','deepseek','claude'], workspace: str, prompt: str,
         target: str|None=None, model: str|None=None,
         mode: Literal['default','plan','review']|None=None,
         workflow: Literal['plan','grill-me','boost','teamwork-preview']|None=None,
         allow_writes: bool=False, timeout_seconds: int=1200) -> dict[str, Any]:
-        """Start an authorized bounded task and return a task ID. Codex/DeepSeek require a registered target; Antigravity uses its workspace mapping. Set allow_writes only for user-authorized edits. Model defaults stay with the selected provider."""
+        """Start an authorized bounded task and return a task ID. Codex, DeepSeek and Claude require registered targets; Antigravity uses its workspace mapping. Set allow_writes only for authorized edits. Model defaults stay with the selected provider."""
         return manager.start(provider,workspace,prompt,target,model,mode,workflow,allow_writes,timeout_seconds)
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True),structured_output=True)
@@ -56,8 +56,9 @@ def main():
     parser.add_argument('--codex-targets-file',type=Path)
     parser.add_argument('--projects-file',type=Path)
     parser.add_argument('--deepseek-targets-file',type=Path)
+    parser.add_argument('--claude-targets-file',type=Path)
     args=parser.parse_args()
-    manager=TaskManager(Path(__file__).resolve().parents[1],args.state_dir,args.codex_targets_file,args.projects_file,args.deepseek_targets_file)
+    manager=TaskManager(Path(__file__).resolve().parents[1],args.state_dir,args.codex_targets_file,args.projects_file,args.deepseek_targets_file,args.claude_targets_file)
     try:
         create_server(manager).run(transport='stdio')
     finally:
